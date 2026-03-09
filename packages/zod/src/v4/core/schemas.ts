@@ -2329,6 +2329,40 @@ export const $ZodDiscriminatedUnion: core.$constructor<$ZodDiscriminatedUnion> =
       return map;
     });
 
+    // Build a backward (encode) discriminator map using output-side values.
+    // For codec/pipe discriminator fields, the output (domain) values differ from the input (raw) values.
+    const discBackward = util.cached(() => {
+      const opts = def.options as $ZodTypeDiscriminable[];
+      const map: Map<util.Primitive, $ZodType> = new Map();
+      for (const o of opts) {
+        // Try to get output-side values for the discriminator field.
+        // For objects, inspect the shape's discriminator field directly.
+        const shape = (o._zod.def as any)?.shape as Record<string, $ZodType> | undefined;
+        let outputValues: util.PrimitiveSet | undefined;
+        if (shape) {
+          const field = shape[def.discriminator];
+          if (field) {
+            const fieldDef = field._zod.def as any;
+            // If this is a pipe/codec, the output-side values come from def.out
+            if (fieldDef?.type === "pipe" && fieldDef?.out) {
+              outputValues = (fieldDef.out as $ZodType)._zod.values;
+            }
+          }
+        }
+        // Fall back to forward (input-side) propValues if no output-side values found
+        if (!outputValues || outputValues.size === 0) {
+          outputValues = o._zod.propValues?.[def.discriminator];
+        }
+        if (!outputValues || outputValues.size === 0) continue;
+        for (const v of outputValues) {
+          if (!map.has(v)) {
+            map.set(v, o);
+          }
+        }
+      }
+      return map;
+    });
+
     inst._zod.parse = (payload, ctx) => {
       const input = payload.value;
       if (!util.isObject(input)) {
@@ -2342,7 +2376,8 @@ export const $ZodDiscriminatedUnion: core.$constructor<$ZodDiscriminatedUnion> =
         return payload;
       }
 
-      const opt = disc.value.get(input?.[def.discriminator] as any);
+      const discMap = ctx.direction === "backward" ? discBackward.value : disc.value;
+      const opt = discMap.get(input?.[def.discriminator] as any);
       if (opt) {
         return opt._zod.run(payload, ctx) as any;
       }
