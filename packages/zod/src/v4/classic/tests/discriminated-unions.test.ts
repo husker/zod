@@ -659,3 +659,34 @@ test("def", () => {
   expect(schema.def.discriminator).toEqual("type");
   expect(schema.def.unionFallback).toEqual(true);
 });
+
+test("codec discriminator - encode works symmetrically with decode", () => {
+  // Codecs that map raw values (1, 2) to domain values ('one', 'two')
+  const LiteralTestCodec1 = z.codec(z.literal(1), z.literal("one"), {
+    decode: (_raw) => "one" as const,
+    encode: (_domain) => 1 as const,
+  });
+  const LiteralTestCodec2 = z.codec(z.literal(2), z.literal("two"), {
+    decode: (_raw) => "two" as const,
+    encode: (_domain) => 2 as const,
+  });
+
+  const TestUnionSchema = z.discriminatedUnion("type", [
+    z.object({ type: LiteralTestCodec1, valueString: z.string() }),
+    z.object({ type: LiteralTestCodec2, valueNumber: z.number() }),
+  ]);
+
+  // decode: raw → domain
+  const domain1 = TestUnionSchema.decode({ type: 1, valueString: "test value" });
+  expect(domain1).toEqual({ type: "one", valueString: "test value" });
+
+  const domain2 = TestUnionSchema.decode({ type: 2, valueNumber: 42 });
+  expect(domain2).toEqual({ type: "two", valueNumber: 42 });
+
+  // encode: domain → raw (was throwing "No matching discriminator")
+  const raw1 = TestUnionSchema.encode({ type: "one", valueString: "test value" });
+  expect(raw1).toEqual({ type: 1, valueString: "test value" });
+
+  const raw2 = TestUnionSchema.encode({ type: "two", valueNumber: 42 });
+  expect(raw2).toEqual({ type: 2, valueNumber: 42 });
+});
